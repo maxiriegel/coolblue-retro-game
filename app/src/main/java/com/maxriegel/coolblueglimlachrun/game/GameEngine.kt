@@ -1,5 +1,6 @@
 package com.maxriegel.coolblueglimlachrun.game
 
+import com.maxriegel.coolblueglimlachrun.audio.MusicScene
 import com.maxriegel.coolblueglimlachrun.audio.SoundEffect
 import com.maxriegel.coolblueglimlachrun.audio.SoundPlayer
 import com.maxriegel.coolblueglimlachrun.data.ScoreRepository
@@ -51,6 +52,8 @@ class GameEngine(
     var cameraX: Float = 0f
         private set
 
+    var viewportWidth: Float = GameConfig.VIEW_WIDTH
+
     var demoModeEnabled: Boolean = false
         private set
 
@@ -80,19 +83,35 @@ class GameEngine(
 
     val powerUps: MutableList<PowerUpItem> = mutableListOf()
     val particles: MutableList<Particle> = mutableListOf()
+    val trailGhosts: MutableList<TrailGhost> = mutableListOf()
     val floatingTexts: MutableList<FloatingText> = mutableListOf()
     val confetti: MutableList<ConfettiPiece> = mutableListOf()
 
     private var lastJumpHeld: Boolean = false
+    private var trailSpawnTimer: Float = 0f
+    private var coinStreak: Int = 0
+    private var coinStreakTimer: Float = 0f
 
     val isMuted: Boolean
         get() = soundPlayer.isMuted
+
+    val isMusicEnabled: Boolean
+        get() = soundPlayer.isMusicEnabled
+
+    init {
+        syncMusicScene()
+    }
 
     fun getLeaderboard(limit: Int = 5): List<ScoreEntry> = scoreRepository.getTopScores(limit)
 
     fun selectCharacter(character: CharacterType) {
         selectedCharacter = character
         soundPlayer.play(SoundEffect.SELECT)
+        soundPlayer.playCharacterMotif(character)
+    }
+
+    fun cycleCharacter(delta: Int) {
+        selectCharacter(selectedCharacter.next(delta))
     }
 
     fun toggleDemoMode(): Boolean {
@@ -109,14 +128,27 @@ class GameEngine(
     }
 
     fun toggleMute(): Boolean {
-        return soundPlayer.toggleMute()
+        val muted = soundPlayer.toggleMute()
+        if (!muted) {
+            soundPlayer.play(SoundEffect.SELECT)
+        }
+        return muted
+    }
+
+    fun toggleMusic(): Boolean {
+        val enabled = soundPlayer.toggleMusic()
+        showBanner(if (enabled) "🎵 Chiptune-muziek AAN" else "🎵 Chiptune-muziek UIT")
+        soundPlayer.play(SoundEffect.SELECT)
+        return enabled
     }
 
     fun returnToTitle() {
         screen = GameScreen.TITLE
         confetti.clear()
         particles.clear()
+        trailGhosts.clear()
         floatingTexts.clear()
+        syncMusicScene()
         soundPlayer.play(SoundEffect.SELECT)
     }
 
@@ -129,6 +161,7 @@ class GameEngine(
         runScoreSaved = false
         loadLevel(startLevel.coerceIn(1, GameConfig.TOTAL_LEVELS), preserveShield = false)
         screen = GameScreen.PLAYING
+        syncMusicScene()
         soundPlayer.play(SoundEffect.SELECT)
     }
 
@@ -139,6 +172,7 @@ class GameEngine(
         } else {
             loadLevel(target, preserveShield = player.hasBakfietsShield)
             screen = GameScreen.PLAYING
+            syncMusicScene()
             soundPlayer.play(SoundEffect.SELECT)
         }
     }
@@ -150,6 +184,7 @@ class GameEngine(
             hearts = GameConfig.STARTING_HEARTS
             loadLevel(currentLevelNumber, preserveShield = false)
             screen = GameScreen.PLAYING
+            syncMusicScene()
             soundPlayer.play(SoundEffect.SELECT)
         }
     }
@@ -159,6 +194,7 @@ class GameEngine(
         if (currentLevelNumber < GameConfig.TOTAL_LEVELS) {
             loadLevel(currentLevelNumber + 1, preserveShield = player.hasBakfietsShield)
             screen = GameScreen.PLAYING
+            syncMusicScene()
             soundPlayer.play(SoundEffect.SELECT)
         } else {
             enterVictory()
@@ -179,12 +215,28 @@ class GameEngine(
         cameraX = 0f
         flagSlideProgress = 0f
         levelClearDelayTimer = 0f
+        coinStreak = 0
+        coinStreakTimer = 0f
+        trailSpawnTimer = 0f
         powerUps.clear()
         particles.clear()
+        trailGhosts.clear()
         floatingTexts.clear()
         confetti.clear()
         lastJumpHeld = false
         showBanner("${level.code} ${level.title} — ${level.subtitle}")
+    }
+
+    private fun syncMusicScene() {
+        val scene = when (screen) {
+            GameScreen.TITLE -> MusicScene.TITLE
+            GameScreen.PLAYING -> when (level.theme) {
+                LevelTheme.WAREHOUSE -> MusicScene.WAREHOUSE
+                LevelTheme.CANALS -> MusicScene.CANALS
+            }
+            GameScreen.LEVEL_CLEAR, GameScreen.VICTORY, GameScreen.GAME_OVER -> MusicScene.NONE
+        }
+        soundPlayer.setMusicScene(scene)
     }
 
     fun update(rawDt: Float, input: InputState) {
@@ -198,27 +250,32 @@ class GameEngine(
         if (screenShakeTimer > 0f) {
             screenShakeTimer = max(0f, screenShakeTimer - dt)
         }
+        if (coinStreakTimer > 0f) {
+            coinStreakTimer = max(0f, coinStreakTimer - dt)
+            if (coinStreakTimer == 0f) coinStreak = 0
+        }
 
         updateParticles(dt)
+        updateTrailGhosts(dt)
         updateFloatingTexts(dt)
         updateConfetti(dt)
 
         when (screen) {
             GameScreen.TITLE -> {
-                // Idle animations handled via worldTime
+                // Idle animations driven by worldTime
             }
             GameScreen.PLAYING -> updatePlaying(dt, input)
             GameScreen.LEVEL_CLEAR -> {
                 flagSlideProgress = min(1f, flagSlideProgress + dt * 1.4f)
                 levelClearDelayTimer += dt
-                if (confetti.size < 90 && levelClearDelayTimer < 2.0f) {
+                if (confetti.size < 95 && levelClearDelayTimer < 2.2f) {
                     spawnConfettiBurst(level.flagX, 240f, 4)
                 }
             }
             GameScreen.VICTORY -> {
                 flagSlideProgress = 1f
-                if (confetti.size < 110) {
-                    spawnConfettiBurst(cameraX + Random.nextFloat() * GameConfig.VIEW_WIDTH, -10f, 2)
+                if (confetti.size < 120) {
+                    spawnConfettiBurst(cameraX + Random.nextFloat() * viewportWidth, -10f, 2)
                 }
             }
             GameScreen.GAME_OVER -> {
@@ -234,6 +291,10 @@ class GameEngine(
             triggerGameOver()
             return
         }
+
+        // Smooth squash & stretch spring-back
+        player.squashX += (1f - player.squashX) * min(1f, dt * 12f)
+        player.stretchY += (1f - player.stretchY) * min(1f, dt * 12f)
 
         // Animate platforms & boxes
         for (platform in level.platforms) {
@@ -293,8 +354,10 @@ class GameEngine(
             player.onGround = false
             player.coyoteTimer = 0f
             player.jumpBufferTimer = 0f
+            player.squashX = 0.78f
+            player.stretchY = 1.25f
             soundPlayer.play(SoundEffect.JUMP)
-            spawnDustBurst(player.x + player.width / 2f, player.y + player.height, 6)
+            spawnDustBurst(player.x + player.width / 2f, player.y + player.height, 7)
         }
 
         // Variable jump height (short hop when releasing jump early)
@@ -314,17 +377,71 @@ class GameEngine(
         resolveHorizontalCollisions(prevX)
 
         // Move Y & resolve vertical collisions
+        val wasOnGround = player.onGround
+        val preFallVy = player.vy
         val prevBottom = player.y + player.height
         val prevTop = player.y
         player.y += player.vy * dt
         player.onGround = false
         resolveVerticalCollisions(prevTop, prevBottom)
 
-        // Walking animation
+        // Landing impact juice!
+        if (!wasOnGround && player.onGround) {
+            player.airCombo = 0
+            if (preFallVy > 250f) {
+                val intensity = ((preFallVy - 250f) / 700f).coerceIn(0.15f, 1f)
+                player.squashX = 1f + 0.24f * intensity
+                player.stretchY = 1f - 0.20f * intensity
+                spawnDustBurst(player.x + player.width / 2f, player.y + player.height, (4 + intensity * 5).toInt())
+                if (preFallVy > 420f) {
+                    soundPlayer.play(SoundEffect.LAND)
+                }
+            }
+        }
+
+        // Walking animation & sprint dust
         if (player.onGround && abs(player.vx) > 20f) {
-            player.animTime += dt * (abs(player.vx) / 90f)
+            player.animTime += dt * (abs(player.vx) / 88f)
+            if (abs(player.vx) > 290f) {
+                player.runDustTimer -= dt
+                if (player.runDustTimer <= 0f) {
+                    player.runDustTimer = 0.11f
+                    val footX = if (player.facingRight) player.x + 8f else player.x + player.width - 8f
+                    particles.add(
+                        Particle(
+                            x = footX,
+                            y = player.y + player.height - 3f,
+                            vx = -player.vx * 0.22f + (Random.nextFloat() - 0.5f) * 30f,
+                            vy = -25f - Random.nextFloat() * 35f,
+                            life = 0.26f,
+                            maxLife = 0.26f,
+                            size = 7f + Random.nextFloat() * 4f,
+                            colorArgb = 0xAAFFFFFF.toInt(),
+                            shape = ParticleShape.DUST
+                        )
+                    )
+                }
+            }
         } else if (!player.onGround) {
             player.animTime += dt * 3f
+        }
+
+        // Bakfiets Turbo speed afterimage trail
+        if ((player.hasBakfietsShield || demoModeEnabled) && (abs(player.vx) > 310f || abs(player.vy) > 520f)) {
+            trailSpawnTimer -= dt
+            if (trailSpawnTimer <= 0f) {
+                trailSpawnTimer = 0.045f
+                trailGhosts.add(
+                    TrailGhost(
+                        x = player.x,
+                        y = player.y,
+                        facingRight = player.facingRight,
+                        animTime = player.animTime,
+                        life = 0.18f,
+                        maxLife = 0.18f
+                    )
+                )
+            }
         }
 
         // Pit fall handling (canal water / warehouse gap)
@@ -349,9 +466,10 @@ class GameEngine(
             return
         }
 
-        // Smooth Mario-style camera follow
-        val targetCamX = (player.x - GameConfig.VIEW_WIDTH * 0.36f)
-            .coerceIn(0f, max(0f, level.worldWidth - GameConfig.VIEW_WIDTH))
+        // Smooth Mario-style camera follow adapted to active viewportWidth
+        val lookAheadRatio = if (viewportWidth < 980f) 0.32f else 0.36f
+        val targetCamX = (player.x - viewportWidth * lookAheadRatio)
+            .coerceIn(0f, max(0f, level.worldWidth - viewportWidth))
         cameraX += (targetCamX - cameraX) * min(1f, dt * 8.5f)
     }
 
@@ -374,7 +492,6 @@ class GameEngine(
     }
 
     private fun resolveHorizontalCollisions(prevX: Float) {
-        // Collide against solid pillars/ground and QuestionBoxes
         for (p in level.platforms) {
             if (!isFullSolid(p.type)) continue
             if (rectsOverlap(player.x, player.y + 4f, player.width, player.height - 8f, p.x, p.y, p.width, p.height)) {
@@ -401,21 +518,21 @@ class GameEngine(
     }
 
     private fun resolveVerticalCollisions(prevTop: Float, prevBottom: Float) {
-        // Check platforms
         for (p in level.platforms) {
             val horizOverlap = player.x + player.width > p.x + 4f && player.x < p.x + p.width - 4f
             if (!horizOverlap) continue
 
-            // Landing on top
             if (player.vy >= 0f && prevBottom <= p.y + 18f && player.y + player.height >= p.y) {
                 player.y = p.y - player.height
                 if (p.type == PlatformType.SPRING_PAD) {
                     player.vy = GameConfig.SPRING_VELOCITY
                     player.onGround = false
-                    p.springAnimTimer = 0.35f
+                    player.squashX = 0.70f
+                    player.stretchY = 1.35f
+                    p.springAnimTimer = 0.38f
                     soundPlayer.play(SoundEffect.SPRING)
-                    spawnSmileSparkles(p.x + p.width / 2f, p.y, 10, 0xFFFF6600.toInt())
-                    floatingTexts.add(FloatingText(p.x + p.width / 2f, p.y - 18f, "BOING!", 0xFFFF6600.toInt(), 0.7f))
+                    spawnSmileSparkles(p.x + p.width / 2f, p.y, 12, 0xFFFF6600.toInt(), includeStars = true)
+                    floatingTexts.add(FloatingText(p.x + p.width / 2f, p.y - 18f, "BOING!", 0xFFFF6600.toInt(), 0.75f, 0.75f, 1.1f))
                 } else {
                     player.vy = 0f
                     player.onGround = true
@@ -425,13 +542,11 @@ class GameEngine(
                     }
                 }
             } else if (isFullSolid(p.type) && player.vy < 0f && prevTop >= p.y + p.height - 18f && player.y <= p.y + p.height) {
-                // Hitting ceiling of solid blocks
                 player.y = p.y + p.height
                 player.vy = 0f
             }
         }
 
-        // Check QuestionBoxes (solid top + head-bonk from below!)
         for (box in level.boxes) {
             val horizOverlap = player.x + player.width > box.x + 4f && player.x < box.x + box.size - 4f
             if (!horizOverlap) continue
@@ -443,6 +558,8 @@ class GameEngine(
             } else if (player.vy < 0f && prevTop >= box.y + box.size - 22f && player.y <= box.y + box.size) {
                 player.y = box.y + box.size
                 player.vy = 60f
+                player.squashX = 1.16f
+                player.stretchY = 0.86f
                 triggerQuestionBox(box)
             }
         }
@@ -455,19 +572,19 @@ class GameEngine(
     private fun triggerQuestionBox(box: QuestionBox) {
         if (box.isHit) {
             box.bumpOffset = 6f
-            soundPlayer.play(SoundEffect.BOX_HIT)
+            soundPlayer.play(SoundEffect.BOX_EMPTY)
             return
         }
         box.isHit = true
-        box.bumpOffset = 18f
+        box.bumpOffset = 20f
         soundPlayer.play(SoundEffect.BOX_HIT)
 
         when (box.reward) {
             BoxReward.SMILE_BURST -> {
                 smilesCollected += 3
                 score += 300
-                soundPlayer.play(SoundEffect.SMILE_COIN)
-                spawnSmileSparkles(box.x + box.size / 2f, box.y - 10f, 12, 0xFFFF9900.toInt(), includeSmiles = true)
+                soundPlayer.playCoinStreak(2)
+                spawnSmileSparkles(box.x + box.size / 2f, box.y - 10f, 14, 0xFFFF9900.toInt(), includeSmiles = true, includeStars = true)
                 floatingTexts.add(FloatingText(box.x + box.size / 2f, box.y - 24f, "+3 Glimlachen!", 0xFFFF6600.toInt(), 1.0f))
             }
             BoxReward.BAKFIETS_SHIELD -> {
@@ -479,8 +596,8 @@ class GameEngine(
                         vy = -260f
                     )
                 )
-                spawnSmileSparkles(box.x + box.size / 2f, box.y - 14f, 10, 0xFF0090E3.toInt())
-                floatingTexts.add(FloatingText(box.x + box.size / 2f, box.y - 24f, "Coolblue Bakfiets!", 0xFF0090E3.toInt(), 1.05f))
+                spawnSmileSparkles(box.x + box.size / 2f, box.y - 14f, 12, 0xFF0090E3.toInt(), includeStars = true)
+                floatingTexts.add(FloatingText(box.x + box.size / 2f, box.y - 24f, "Coolblue Bakfiets!", 0xFF0090E3.toInt(), 1.05f, 1.05f, 1.1f))
             }
         }
     }
@@ -497,8 +614,10 @@ class GameEngine(
                 coin.collected = true
                 smilesCollected += 1
                 score += 100
-                soundPlayer.play(SoundEffect.SMILE_COIN)
-                spawnSmileSparkles(coin.x, coin.y, 7, 0xFFFFAA00.toInt(), includeSmiles = true)
+                soundPlayer.playCoinStreak(coinStreak)
+                coinStreak = (coinStreak + 1).coerceAtMost(6)
+                coinStreakTimer = 0.85f
+                spawnSmileSparkles(coin.x, coin.y, 8, 0xFFFFAA00.toInt(), includeSmiles = true, includeStars = true)
                 floatingTexts.add(FloatingText(coin.x, coin.y - 14f, "+100", 0xFFFF6600.toInt(), 0.7f))
             }
         }
@@ -517,7 +636,6 @@ class GameEngine(
             item.x += item.vx * dt
             item.y += item.vy * dt
 
-            // Bounce off walls & stay on platforms
             for (p in level.platforms) {
                 val horiz = item.x + item.width > p.x && item.x < p.x + p.width
                 if (horiz && item.vy >= 0f && prevBottom <= p.y + 18f && item.y + item.height >= p.y) {
@@ -532,15 +650,19 @@ class GameEngine(
             if (rectsOverlap(player.x, player.y, player.width, player.height, item.x, item.y, item.width, item.height)) {
                 item.collected = true
                 player.hasBakfietsShield = true
+                player.squashX = 0.85f
+                player.stretchY = 1.18f
                 score += 500
                 soundPlayer.play(SoundEffect.POWERUP)
-                spawnSmileSparkles(player.x + player.width / 2f, player.y + 20f, 16, 0xFF0090E3.toInt(), includeSmiles = true)
+                spawnSmileSparkles(player.x + player.width / 2f, player.y + 20f, 18, 0xFF0090E3.toInt(), includeSmiles = true, includeStars = true)
                 floatingTexts.add(
                     FloatingText(
                         player.x + player.width / 2f,
                         player.y - 26f,
                         "BAKFIETS TURBO!",
                         0xFF0090E3.toInt(),
+                        1.15f,
+                        1.15f,
                         1.15f
                     )
                 )
@@ -573,7 +695,6 @@ class GameEngine(
                 enemy.y = enemy.baseY + sin(enemy.animTime * 3.2f) * 18f
             }
 
-            // Player vs Enemy collision (slightly forgiving hitbox)
             if (rectsOverlap(
                     player.x + 4f, player.y + 4f, player.width - 8f, player.height - 4f,
                     enemy.x + 3f, enemy.y + 3f, enemy.width - 6f, enemy.height - 6f
@@ -595,16 +716,22 @@ class GameEngine(
 
     private fun defeatEnemyWithSmile(enemy: Enemy, jumpHeld: Boolean) {
         enemy.alive = false
-        enemy.squashedTimer = 0.55f
+        enemy.squashedTimer = 0.65f
         enemiesSmiled += 1
-        val pts = if (enemy.type == EnemyType.ONE_STAR_CLOUD) 300 else 200
+        player.airCombo += 1
+        val basePts = if (enemy.type == EnemyType.ONE_STAR_CLOUD) 300 else 200
+        val comboMult = player.airCombo.coerceAtMost(4)
+        val pts = basePts * comboMult
         score += pts
         player.vy = if (jumpHeld) GameConfig.STOMP_HIGH_BOUNCE_VELOCITY else GameConfig.STOMP_BOUNCE_VELOCITY
         player.onGround = false
+        player.squashX = 1.22f
+        player.stretchY = 0.80f
         soundPlayer.play(SoundEffect.STOMP)
-        spawnSmileSparkles(enemy.x + enemy.width / 2f, enemy.y + enemy.height / 2f, 14, 0xFFFF6600.toInt(), includeSmiles = true)
-        val msg = if (enemy.type == EnemyType.ONE_STAR_CLOUD) "5 STERREN! +$pts" else "BLIJ! +$pts"
-        floatingTexts.add(FloatingText(enemy.x + enemy.width / 2f, enemy.y - 16f, msg, 0xFF0090E3.toInt(), 1.0f))
+        spawnSmileSparkles(enemy.x + enemy.width / 2f, enemy.y + enemy.height / 2f, 16, 0xFFFF6600.toInt(), includeSmiles = true, includeStars = true)
+        val prefix = if (comboMult >= 2) "${comboMult}x COMBO! " else ""
+        val msg = if (enemy.type == EnemyType.ONE_STAR_CLOUD) "${prefix}5 STERREN! +$pts" else "${prefix}BLIJ! +$pts"
+        floatingTexts.add(FloatingText(enemy.x + enemy.width / 2f, enemy.y - 16f, msg, 0xFF0090E3.toInt(), 1.05f, 1.05f, if (comboMult >= 2) 1.15f else 1.0f))
     }
 
     private fun damagePlayer() {
@@ -615,9 +742,11 @@ class GameEngine(
             player.hasBakfietsShield = false
             player.invulnTimer = 1.6f
             player.vy = -420f
-            soundPlayer.play(SoundEffect.HURT)
-            spawnSmileSparkles(player.x + player.width / 2f, player.y + 24f, 12, 0xFF0090E3.toInt())
-            floatingTexts.add(FloatingText(player.x + player.width / 2f, player.y - 20f, "Schild gered!", 0xFF0090E3.toInt(), 0.9f))
+            player.squashX = 1.2f
+            player.stretchY = 0.82f
+            soundPlayer.play(SoundEffect.SHIELD_SAVE)
+            spawnSmileSparkles(player.x + player.width / 2f, player.y + 24f, 14, 0xFF0090E3.toInt(), includeStars = true)
+            floatingTexts.add(FloatingText(player.x + player.width / 2f, player.y - 20f, "Schild gered!", 0xFF0090E3.toInt(), 0.95f))
             return
         }
 
@@ -629,17 +758,25 @@ class GameEngine(
             player.invulnTimer = 1.8f
             player.vy = -460f
             player.vx = if (player.facingRight) -220f else 220f
+            player.squashX = 0.82f
+            player.stretchY = 1.20f
             floatingTexts.add(FloatingText(player.x + player.width / 2f, player.y - 20f, "Oeps!", 0xFFE53935.toInt(), 0.85f))
         }
     }
 
     private fun handlePitFall() {
+        if (level.theme == LevelTheme.CANALS) {
+            spawnWaterSplash(player.x + player.width / 2f, GameConfig.GROUND_Y + 26f, 14)
+            soundPlayer.play(SoundEffect.SPLASH)
+        }
+
         if (demoModeEnabled) {
-            // Friendly superhero save for live demos!
             player.x = player.lastSafeX
             player.y = player.lastSafeY - 30f
             player.vx = 0f
             player.vy = -520f
+            player.squashX = 0.78f
+            player.stretchY = 1.26f
             soundPlayer.play(SoundEffect.SPRING)
             floatingTexts.add(FloatingText(player.x + player.width / 2f, player.y - 20f, "Demo Reddingsactie!", 0xFF0090E3.toInt(), 0.95f))
             return
@@ -667,28 +804,34 @@ class GameEngine(
         player.x = level.flagX - 18f
         player.vx = 0f
         player.vy = 0f
-        soundPlayer.play(SoundEffect.LEVEL_CLEAR)
-        spawnConfettiBurst(level.flagX, 260f, 55)
+        trailGhosts.clear()
+        spawnConfettiBurst(level.flagX, 260f, 65)
         floatingTexts.add(
-            FloatingText(level.flagX, 220f, "PAKKET BEZORGD! +${1000 + timeBonus + heightBonus}", 0xFFFF6600.toInt(), 1.6f, 1.6f)
+            FloatingText(level.flagX, 220f, "PAKKET BEZORGD! +${1000 + timeBonus + heightBonus}", 0xFFFF6600.toInt(), 1.6f, 1.6f, 1.15f)
         )
 
         if (currentLevelNumber >= GameConfig.TOTAL_LEVELS) {
+            soundPlayer.play(SoundEffect.VICTORY)
             enterVictory()
         } else {
+            soundPlayer.play(SoundEffect.LEVEL_CLEAR)
             screen = GameScreen.LEVEL_CLEAR
             levelClearDelayTimer = 0f
+            syncMusicScene()
         }
     }
 
     private fun enterVictory() {
         screen = GameScreen.VICTORY
+        syncMusicScene()
         saveRunScoreIfNeeded(levelReached = GameConfig.TOTAL_LEVELS)
-        spawnConfettiBurst(level.flagX, 180f, 80)
+        spawnConfettiBurst(level.flagX, 180f, 90)
     }
 
     private fun triggerGameOver() {
         screen = GameScreen.GAME_OVER
+        syncMusicScene()
+        soundPlayer.play(SoundEffect.GAME_OVER)
         saveRunScoreIfNeeded(levelReached = currentLevelNumber)
     }
 
@@ -714,18 +857,40 @@ class GameEngine(
 
     private fun spawnDustBurst(x: Float, y: Float, count: Int) {
         for (i in 0 until count) {
-            val angle = -0.3f - Random.nextFloat() * 2.5f
-            val speed = 60f + Random.nextFloat() * 110f
+            val angle = -0.25f - Random.nextFloat() * 2.6f
+            val speed = 55f + Random.nextFloat() * 115f
             particles.add(
                 Particle(
                     x = x,
                     y = y,
                     vx = cos(angle) * speed,
                     vy = sin(angle) * speed,
-                    life = 0.35f,
-                    maxLife = 0.35f,
-                    size = 6f + Random.nextFloat() * 5f,
-                    colorArgb = 0xCCFFFFFF.toInt()
+                    life = 0.36f,
+                    maxLife = 0.36f,
+                    size = 7f + Random.nextFloat() * 5f,
+                    colorArgb = 0xCCFFFFFF.toInt(),
+                    shape = ParticleShape.DUST
+                )
+            )
+        }
+    }
+
+    private fun spawnWaterSplash(x: Float, y: Float, count: Int) {
+        for (i in 0 until count) {
+            val angle = -0.35f - Random.nextFloat() * 2.4f
+            val speed = 130f + Random.nextFloat() * 220f
+            val col = if (i % 3 == 0) 0xFFFFFFFF.toInt() else 0xFF4FC3F7.toInt()
+            particles.add(
+                Particle(
+                    x = x + (Random.nextFloat() - 0.5f) * 28f,
+                    y = y,
+                    vx = cos(angle) * speed,
+                    vy = sin(angle) * speed - 60f,
+                    life = 0.55f,
+                    maxLife = 0.55f,
+                    size = 7f + Random.nextFloat() * 6f,
+                    colorArgb = col,
+                    shape = ParticleShape.SPLASH
                 )
             )
         }
@@ -736,23 +901,37 @@ class GameEngine(
         y: Float,
         count: Int,
         primaryColor: Int,
-        includeSmiles: Boolean = false
+        includeSmiles: Boolean = false,
+        includeStars: Boolean = false
     ) {
         for (i in 0 until count) {
             val angle = Random.nextFloat() * (Math.PI * 2.0).toFloat()
-            val speed = 90f + Random.nextFloat() * 210f
-            val color = if (i % 3 == 0) 0xFF0090E3.toInt() else primaryColor
+            val speed = 90f + Random.nextFloat() * 220f
+            val color = when {
+                i % 4 == 0 -> 0xFFFFFFFF.toInt()
+                i % 3 == 0 -> 0xFF0090E3.toInt()
+                else -> primaryColor
+            }
+            val isSmilePiece = includeSmiles && i < 2
+            val shape = when {
+                isSmilePiece -> ParticleShape.SMILE
+                includeStars && i % 2 == 0 -> ParticleShape.STAR
+                else -> ParticleShape.SPARK
+            }
             particles.add(
                 Particle(
                     x = x,
                     y = y,
                     vx = cos(angle) * speed,
-                    vy = sin(angle) * speed - 90f,
-                    life = 0.65f,
-                    maxLife = 0.65f,
-                    size = if (includeSmiles && i == 0) 18f else 7f + Random.nextFloat() * 6f,
+                    vy = sin(angle) * speed - 95f,
+                    life = 0.68f,
+                    maxLife = 0.68f,
+                    size = if (isSmilePiece) 18f else 8f + Random.nextFloat() * 6f,
                     colorArgb = color,
-                    isSmile = includeSmiles && i < 2
+                    isSmile = isSmilePiece,
+                    shape = shape,
+                    rotation = Random.nextFloat() * 360f,
+                    vRot = (Random.nextFloat() - 0.5f) * 320f
                 )
             )
         }
@@ -764,17 +943,18 @@ class GameEngine(
             0xFFFF6600.toInt(),
             0xFFFFFFFF.toInt(),
             0xFFFFD54F.toInt(),
+            0xFF00A896.toInt(),
             0xFF29B6F6.toInt()
         )
         for (i in 0 until count) {
             confetti.add(
                 ConfettiPiece(
-                    x = originX + (Random.nextFloat() - 0.5f) * 260f,
+                    x = originX + (Random.nextFloat() - 0.5f) * 280f,
                     y = originY + (Random.nextFloat() - 0.5f) * 120f,
-                    vx = (Random.nextFloat() - 0.5f) * 320f,
-                    vy = -120f - Random.nextFloat() * 240f,
+                    vx = (Random.nextFloat() - 0.5f) * 330f,
+                    vy = -130f - Random.nextFloat() * 250f,
                     rotation = Random.nextFloat() * 360f,
-                    vRot = (Random.nextFloat() - 0.5f) * 420f,
+                    vRot = (Random.nextFloat() - 0.5f) * 440f,
                     width = 10f + Random.nextFloat() * 8f,
                     height = 6f + Random.nextFloat() * 6f,
                     colorArgb = palette[i % palette.size]
@@ -791,9 +971,22 @@ class GameEngine(
             if (p.life <= 0f) {
                 it.remove()
             } else {
-                p.vy += 480f * dt
+                val grav = if (p.shape == ParticleShape.DUST) 120f else 480f
+                p.vy += grav * dt
                 p.x += p.vx * dt
                 p.y += p.vy * dt
+                p.rotation += p.vRot * dt
+            }
+        }
+    }
+
+    private fun updateTrailGhosts(dt: Float) {
+        val it = trailGhosts.iterator()
+        while (it.hasNext()) {
+            val g = it.next()
+            g.life -= dt
+            if (g.life <= 0f) {
+                it.remove()
             }
         }
     }

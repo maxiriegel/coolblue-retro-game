@@ -17,20 +17,25 @@ import org.robolectric.annotation.Config
 class MainActivityTest {
 
     @Test
-    fun mainActivity_launchesAndRespondsToKeyboardSelectionAndStart() {
+    fun mainActivity_launchesCyclesMaxRemiVeroAndStartsGame() {
         val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
         val activity = controller.get()
 
         assertNotNull(activity.gameView)
         assertEquals(GameScreen.TITLE, activity.gameView.engine.screen)
+        assertEquals(CharacterType.MAX, activity.gameView.engine.selectedCharacter)
 
-        // Arrow right selects Remi on Title Screen
+        // Arrow right selects Remi, then Vero
         activity.onKeyDown(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT))
         assertEquals(CharacterType.REMI, activity.gameView.engine.selectedCharacter)
 
-        // Enter starts Level 1 immediately
+        activity.onKeyDown(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT))
+        assertEquals(CharacterType.VERO, activity.gameView.engine.selectedCharacter)
+
+        // Enter starts Level 1 immediately as Vero
         activity.onKeyDown(KeyEvent.KEYCODE_ENTER, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
         assertEquals(GameScreen.PLAYING, activity.gameView.engine.screen)
+        assertEquals(CharacterType.VERO, activity.gameView.engine.selectedCharacter)
 
         controller.pause().stop().destroy()
     }

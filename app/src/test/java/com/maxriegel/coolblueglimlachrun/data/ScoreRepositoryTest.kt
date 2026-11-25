@@ -32,16 +32,17 @@ class ScoreRepositoryTest {
     }
 
     @Test
-    fun persistsAndSortsMaxAndRemiScoresDescending() {
+    fun persistsAndSortsMaxRemiAndVeroScoresDescending() {
         repository.saveScore(ScoreEntry(CharacterType.MAX, 2400, 18, 2, 54, 1000L))
+        repository.saveScore(ScoreEntry(CharacterType.VERO, 3650, 28, 2, 45, 2500L))
         repository.saveScore(ScoreEntry(CharacterType.REMI, 3150, 24, 2, 48, 2000L))
-        repository.saveScore(ScoreEntry(CharacterType.MAX, 1500, 12, 1, 35, 3000L))
 
         val top = repository.getTopScores(5)
         assertEquals(3, top.size)
-        assertEquals(CharacterType.REMI, top[0].character)
-        assertEquals(3150, top[0].score)
-        assertEquals(CharacterType.MAX, top[1].character)
-        assertEquals(2400, top[1].score)
+        assertEquals(CharacterType.VERO, top[0].character)
+        assertEquals(3650, top[0].score)
+        assertEquals(CharacterType.REMI, top[1].character)
+        assertEquals(3150, top[1].score)
+        assertEquals(CharacterType.MAX, top[2].character)
     }
 }
