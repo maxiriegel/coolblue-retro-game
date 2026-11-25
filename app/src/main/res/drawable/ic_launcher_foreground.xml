@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Crisp White Coolblue Smiling Delivery Box -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M27,36 L81,36 Q86,36 86,41 L86,77 Q86,82 81,82 L27,82 Q22,82 22,77 L22,41 Q22,36 27,36 Z" />
+    <!-- Top box tape strip -->
+    <path
+        android:fillColor="#D4EEFF"
+        android:pathData="M48,36 L60,36 L60,48 L48,48 Z" />
+    <!-- Retro Mario-style Orange Cap resting on top of the Coolblue box -->
+    <path
+        android:fillColor="#FF6600"
+        android:pathData="M34,36 C34,23 72,23 72,36 Z" />
+    <path
+        android:fillColor="#E65100"
+        android:pathData="M52,32 L84,32 Q87,32 87,35 Q87,38 82,38 L52,38 Z" />
+    <!-- Happy Eyes -->
+    <path
+        android:fillColor="#002B54"
+        android:pathData="M39,52 A3.8,3.8 0 1,0 46.6,52 A3.8,3.8 0 1,0 39,52 Z" />
+    <path
+        android:fillColor="#002B54"
+        android:pathData="M61.4,52 A3.8,3.8 0 1,0 69,52 A3.8,3.8 0 1,0 61.4,52 Z" />
+    <!-- Iconic Big Coolblue Orange Smile -->
+    <path
+        android:strokeColor="#FF6600"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:pathData="M37,63 Q54,77 71,63" />
+</vector>
