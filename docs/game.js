@@ -62,28 +62,30 @@
   // PERSISTENT SCORE REPOSITORY (localStorage)
   // =========================================================================
   const STORAGE_KEY = 'coolblue_glimlach_scores_v1';
+  let memoryScores = [];
 
   const ScoreStore = {
     getTopScores(limit = 5) {
+      let source = memoryScores;
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
-        return parsed
-          .filter((e) => e && CHARACTERS[e.character] && typeof e.score === 'number')
-          .sort((a, b) => (b.score - a.score) || (b.smiles - a.smiles))
-          .slice(0, limit);
-      } catch (_) {
-        return [];
-      }
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) source = parsed;
+        }
+      } catch (_) {}
+      return source
+        .filter((e) => e && CHARACTERS[e.character] && typeof e.score === 'number')
+        .sort((a, b) => (b.score - a.score) || (b.smiles - a.smiles))
+        .slice(0, limit);
     },
     saveScore(entry) {
+      const list = this.getTopScores(15);
+      list.push(entry);
+      list.sort((a, b) => (b.score - a.score) || (b.smiles - a.smiles));
+      memoryScores = list.slice(0, 10);
       try {
-        const list = this.getTopScores(15);
-        list.push(entry);
-        list.sort((a, b) => (b.score - a.score) || (b.smiles - a.smiles));
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, 10)));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(memoryScores));
       } catch (_) {}
     }
   };
@@ -2783,8 +2785,8 @@
     let rawSafe = { left: 0, top: 0, right: 0, bottom: 0 };
 
     function resizeCanvas() {
-      cssW = window.innerWidth;
-      cssH = window.innerHeight;
+      cssW = Math.max(320, window.innerWidth || document.documentElement.clientWidth || 960);
+      cssH = Math.max(320, window.innerHeight || document.documentElement.clientHeight || 600);
       const dpr = Math.min(window.devicePixelRatio || 1, 3);
       canvas.width = Math.round(cssW * dpr);
       canvas.height = Math.round(cssH * dpr);
@@ -2802,6 +2804,9 @@
     }
     window.addEventListener('resize', resizeCanvas);
     window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 80));
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(resizeCanvas).observe(document.documentElement);
+    }
     resizeCanvas();
 
     function toggleFullscreen() {
