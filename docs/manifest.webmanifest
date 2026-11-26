@@ -1,7 +1,7 @@
 {
   "name": "Coolblue Glimlach Run",
   "short_name": "Glimlach Run",
-  "description": "Alles voor een glimlach! Retro Jump-'n'-Run met Max, Remi & Vero.",
+  "description": "Retro Coolblue platformer featuring Max, Remi & Vero — Alles voor een glimlach!",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
