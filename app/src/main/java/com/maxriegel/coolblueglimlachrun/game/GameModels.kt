@@ -3,20 +3,43 @@ package com.maxriegel.coolblueglimlachrun.game
 enum class CharacterType(
     val displayName: String,
     val badgeTitle: String,
-    val partnerCheerText: String
+    val partnerCheerText: String,
+    val cheerForHero: String,
+    val accentColorArgb: Int
 ) {
     MAX(
         displayName = "Max",
         badgeTitle = "Express Bezorger",
-        partnerCheerText = "Lekker bezig, Remi!"
+        partnerCheerText = "Lekker bezig, Remi!",
+        cheerForHero = "Top gedaan, Max!",
+        accentColorArgb = 0xFF0090E3.toInt()
     ),
     REMI(
         displayName = "Remi",
         badgeTitle = "Glimlach Kampioen",
-        partnerCheerText = "Top gedaan, Max!"
+        partnerCheerText = "Top gedaan, Max!",
+        cheerForHero = "Lekker bezig, Remi!",
+        accentColorArgb = 0xFFFF6600.toInt()
+    ),
+    VERO(
+        displayName = "Vero",
+        badgeTitle = "Klantgeluk Ster",
+        partnerCheerText = "Super bezorgd, Vero!",
+        cheerForHero = "Super bezorgd, Vero!",
+        accentColorArgb = 0xFF00A896.toInt()
     );
 
-    fun partner(): CharacterType = if (this == MAX) REMI else MAX
+    fun teammates(): List<CharacterType> = entries.filter { it != this }
+
+    fun partner(): CharacterType = teammates().first()
+
+    fun secondPartner(): CharacterType = teammates().last()
+
+    fun next(delta: Int = 1): CharacterType {
+        val list = entries
+        val idx = (ordinal + delta).mod(list.size)
+        return list[idx]
+    }
 }
 
 enum class GameScreen {
@@ -107,6 +130,15 @@ data class PowerUpItem(
     var collected: Boolean = false
 )
 
+enum class ParticleShape {
+    CIRCLE,
+    STAR,
+    SPARK,
+    DUST,
+    SPLASH,
+    SMILE
+}
+
 data class Particle(
     var x: Float,
     var y: Float,
@@ -116,7 +148,19 @@ data class Particle(
     val maxLife: Float,
     val size: Float,
     val colorArgb: Int,
-    val isSmile: Boolean = false
+    val isSmile: Boolean = false,
+    val shape: ParticleShape = if (isSmile) ParticleShape.SMILE else ParticleShape.CIRCLE,
+    var rotation: Float = 0f,
+    val vRot: Float = 0f
+)
+
+data class TrailGhost(
+    val x: Float,
+    val y: Float,
+    val facingRight: Boolean,
+    val animTime: Float,
+    var life: Float,
+    val maxLife: Float = 0.18f
 )
 
 data class FloatingText(
@@ -125,7 +169,8 @@ data class FloatingText(
     val text: String,
     val colorArgb: Int,
     var life: Float,
-    val maxLife: Float = 1.0f
+    val maxLife: Float = 1.0f,
+    val scale: Float = 1.0f
 )
 
 data class ConfettiPiece(
@@ -172,7 +217,11 @@ data class PlayerState(
     var invulnTimer: Float = 0f,
     var animTime: Float = 0f,
     var lastSafeX: Float = 100f,
-    var lastSafeY: Float = 500f
+    var lastSafeY: Float = 500f,
+    var squashX: Float = 1f,
+    var stretchY: Float = 1f,
+    var runDustTimer: Float = 0f,
+    var airCombo: Int = 0
 )
 
 data class InputState(

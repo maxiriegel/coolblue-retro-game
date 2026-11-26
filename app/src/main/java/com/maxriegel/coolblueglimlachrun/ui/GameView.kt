@@ -15,7 +15,7 @@ import com.maxriegel.coolblueglimlachrun.game.InputState
 class GameView(
     context: Context,
     val engine: GameEngine,
-    private val renderer: GameRenderer = GameRenderer()
+    val renderer: GameRenderer = GameRenderer()
 ) : View(context) {
 
     private var keyLeft = false
@@ -31,11 +31,17 @@ class GameView(
     private var running = false
 
     private val activePointers = mutableMapOf<Int, UiAction>()
+    private val pressedActions = mutableSetOf<UiAction>()
 
     init {
         isFocusable = true
         isFocusableInTouchMode = true
         keepScreenOn = true
+    }
+
+    fun setSafeInsets(leftPx: Float, topPx: Float, rightPx: Float, bottomPx: Float) {
+        renderer.setSafeInsets(leftPx, topPx, rightPx, bottomPx)
+        invalidate()
     }
 
     fun startLoop() {
@@ -58,6 +64,7 @@ class GameView(
         touchRight = false
         touchJump = false
         activePointers.clear()
+        pressedActions.clear()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -65,6 +72,9 @@ class GameView(
         val now = System.nanoTime()
         val dt = if (lastFrameNanos == 0L) 0.016f else (now - lastFrameNanos) / 1_000_000_000f
         lastFrameNanos = now
+
+        // Update viewportWidth before engine step so camera clamping matches screen form factor
+        engine.viewportWidth = renderer.computeWorldViewportWidth(width, height)
 
         val input = InputState(
             left = keyLeft || touchLeft,
@@ -74,8 +84,13 @@ class GameView(
         )
         jumpQueued = false
 
+        pressedActions.clear()
+        if (input.left) pressedActions.add(UiAction.TOUCH_LEFT)
+        if (input.right) pressedActions.add(UiAction.TOUCH_RIGHT)
+        if (input.jumpHeld) pressedActions.add(UiAction.TOUCH_JUMP)
+
         engine.update(dt, input)
-        renderer.render(canvas, width, height, engine)
+        renderer.render(canvas, width, height, engine, pressedActions)
 
         if (running) {
             postInvalidateOnAnimation()
@@ -87,7 +102,7 @@ class GameView(
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_A -> {
                 if (engine.screen == GameScreen.TITLE && !isRepeat) {
-                    engine.selectCharacter(CharacterType.MAX)
+                    engine.cycleCharacter(-1)
                 } else {
                     keyLeft = true
                 }
@@ -95,13 +110,13 @@ class GameView(
             }
             KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_D -> {
                 if (engine.screen == GameScreen.TITLE && !isRepeat) {
-                    engine.selectCharacter(CharacterType.REMI)
+                    engine.cycleCharacter(1)
                 } else {
                     keyRight = true
                 }
                 return true
             }
-            KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_W, KeyEvent.KEYCODE_Z -> {
+            KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_W, KeyEvent.KEYCODE_Z, KeyEvent.KEYCODE_BUTTON_A -> {
                 if (!isRepeat) {
                     when (engine.screen) {
                         GameScreen.TITLE -> engine.startNewGame(1)
@@ -116,7 +131,7 @@ class GameView(
                 }
                 return true
             }
-            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BUTTON_START -> {
                 if (!isRepeat) {
                     when (engine.screen) {
                         GameScreen.TITLE -> engine.startNewGame(1)
@@ -138,6 +153,10 @@ class GameView(
                 if (!isRepeat) engine.toggleMute()
                 return true
             }
+            KeyEvent.KEYCODE_B -> {
+                if (!isRepeat) engine.toggleMusic()
+                return true
+            }
             KeyEvent.KEYCODE_G -> {
                 if (!isRepeat) engine.toggleDemoMode()
                 return true
@@ -154,7 +173,7 @@ class GameView(
                 if (!isRepeat) engine.jumpToLevel(2)
                 return true
             }
-            KeyEvent.KEYCODE_ESCAPE -> {
+            KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_BACK -> {
                 if (!isRepeat && engine.screen != GameScreen.TITLE) {
                     engine.returnToTitle()
                     return true
@@ -174,7 +193,7 @@ class GameView(
                 keyRight = false
                 return true
             }
-            KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_W, KeyEvent.KEYCODE_Z -> {
+            KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_W, KeyEvent.KEYCODE_Z, KeyEvent.KEYCODE_BUTTON_A -> {
                 keyJump = false
                 return true
             }
@@ -198,7 +217,7 @@ class GameView(
                 val idx = event.actionIndex
                 val pointerId = event.getPointerId(idx)
                 val (vx, vy) = renderer.screenToVirtual(event.getX(idx), event.getY(idx))
-                val hit = findHitAction(vx, vy)
+                val hit = findHitAction(vx, vy, allowSlop = true)
                 if (hit != null) {
                     if (isContinuousTouchAction(hit)) {
                         activePointers[pointerId] = hit
@@ -216,7 +235,7 @@ class GameView(
                     val pointerId = event.getPointerId(i)
                     if (activePointers.containsKey(pointerId)) {
                         val (vx, vy) = renderer.screenToVirtual(event.getX(i), event.getY(i))
-                        val hit = findHitAction(vx, vy)
+                        val hit = findHitAction(vx, vy, allowSlop = true)
                         if (hit != null && isContinuousTouchAction(hit)) {
                             if (activePointers[pointerId] != UiAction.TOUCH_JUMP && hit == UiAction.TOUCH_JUMP) {
                                 jumpQueued = true
@@ -252,11 +271,24 @@ class GameView(
         touchJump = activePointers.values.contains(UiAction.TOUCH_JUMP)
     }
 
-    private fun findHitAction(vx: Float, vy: Float): UiAction? {
+    private fun findHitAction(vx: Float, vy: Float, allowSlop: Boolean): UiAction? {
         for (i in renderer.activeButtons.indices.reversed()) {
             val btn = renderer.activeButtons[i]
             if (btn.rect.contains(vx, vy)) {
                 return btn.action
+            }
+        }
+        if (allowSlop) {
+            // Forgiving hit slop for fast arcade thumb controls on mobile & tablet
+            for (i in renderer.activeButtons.indices.reversed()) {
+                val btn = renderer.activeButtons[i]
+                if (!isContinuousTouchAction(btn.action)) continue
+                val pad = 22f
+                if (vx >= btn.rect.left - pad && vx <= btn.rect.right + pad &&
+                    vy >= btn.rect.top - pad && vy <= btn.rect.bottom + pad
+                ) {
+                    return btn.action
+                }
             }
         }
         return null
@@ -266,11 +298,13 @@ class GameView(
         when (action) {
             UiAction.SELECT_MAX -> engine.selectCharacter(CharacterType.MAX)
             UiAction.SELECT_REMI -> engine.selectCharacter(CharacterType.REMI)
+            UiAction.SELECT_VERO -> engine.selectCharacter(CharacterType.VERO)
             UiAction.START_GAME -> engine.startNewGame(1)
             UiAction.START_LEVEL_1 -> engine.jumpToLevel(1)
             UiAction.START_LEVEL_2 -> engine.jumpToLevel(2)
             UiAction.TOGGLE_DEMO -> engine.toggleDemoMode()
             UiAction.TOGGLE_TOUCH -> engine.toggleTouchControls()
+            UiAction.TOGGLE_MUSIC -> engine.toggleMusic()
             UiAction.TOGGLE_MUTE -> engine.toggleMute()
             UiAction.RESTART -> engine.restartCurrentLevel()
             UiAction.RETURN_TITLE -> engine.returnToTitle()

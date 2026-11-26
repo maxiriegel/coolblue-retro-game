@@ -23,13 +23,20 @@ class GameEngineTest {
     }
 
     @Test
-    fun selectCharacter_switchesBetweenMaxAndRemiWithCorrectPartner() {
+    fun selectAndCycleCharacter_supportsMaxRemiAndVeroWithCorrectTeammates() {
         assertEquals(CharacterType.MAX, engine.selectedCharacter)
-        assertEquals(CharacterType.REMI, engine.selectedCharacter.partner())
+        assertEquals(listOf(CharacterType.REMI, CharacterType.VERO), engine.selectedCharacter.teammates())
 
-        engine.selectCharacter(CharacterType.REMI)
+        engine.cycleCharacter(1)
         assertEquals(CharacterType.REMI, engine.selectedCharacter)
-        assertEquals(CharacterType.MAX, engine.selectedCharacter.partner())
+        assertEquals(listOf(CharacterType.MAX, CharacterType.VERO), engine.selectedCharacter.teammates())
+
+        engine.cycleCharacter(1)
+        assertEquals(CharacterType.VERO, engine.selectedCharacter)
+        assertEquals(listOf(CharacterType.MAX, CharacterType.REMI), engine.selectedCharacter.teammates())
+
+        engine.cycleCharacter(1)
+        assertEquals(CharacterType.MAX, engine.selectedCharacter)
         assertTrue(soundPlayer.playedEffects.contains(SoundEffect.SELECT))
     }
 
@@ -44,16 +51,15 @@ class GameEngineTest {
     }
 
     @Test
-    fun movementAndJump_advancesPlayerAndPlaysJumpSfx() {
+    fun movementAndJump_advancesPlayerAppliesSquashStretchAndPlaysJumpSfx() {
         engine.startNewGame(1)
-        // Settle player onto ground
         repeat(20) { engine.update(0.016f, InputState()) }
         assertTrue(engine.player.onGround)
         val startX = engine.player.x
         val startY = engine.player.y
 
-        // Run right + jump
         engine.update(0.016f, InputState(right = true, jumpHeld = true, jumpJustPressed = true))
+        assertTrue(engine.player.stretchY > 1.05f)
         repeat(8) { engine.update(0.016f, InputState(right = true, jumpHeld = true)) }
 
         assertTrue(engine.player.x > startX + 20f)
@@ -122,6 +128,7 @@ class GameEngineTest {
         assertFalse(engine.player.hasBakfietsShield)
         assertEquals(GameConfig.STARTING_HEARTS, engine.hearts)
         assertTrue(engine.player.invulnTimer > 0f)
+        assertTrue(soundPlayer.playedEffects.contains(SoundEffect.SHIELD_SAVE))
     }
 
     @Test
@@ -130,7 +137,6 @@ class GameEngineTest {
         engine.toggleDemoMode()
         assertTrue(engine.demoModeEnabled)
 
-        // Pit fall recovery in demo mode
         engine.player.y = GameConfig.VIEW_HEIGHT + 100f
         engine.update(0.016f, InputState())
 
@@ -140,8 +146,8 @@ class GameEngineTest {
     }
 
     @Test
-    fun completingLevelOneAndTwo_reachesVictoryAndSavesScore() {
-        engine.selectCharacter(CharacterType.REMI)
+    fun completingLevelOneAndTwoAsVero_reachesVictoryAndSavesScore() {
+        engine.selectCharacter(CharacterType.VERO)
         engine.startNewGame(1)
 
         // Reach Level 1 flagpole
@@ -156,14 +162,14 @@ class GameEngineTest {
         assertEquals(2, engine.currentLevelNumber)
         assertEquals("Grachtengordel Express", engine.level.title)
 
-        // Reach Level 2 flagpole -> VICTORY & score saved
+        // Reach Level 2 flagpole -> VICTORY & score saved for VERO
         engine.player.x = engine.level.flagX - 5f
         engine.update(0.016f, InputState())
         assertEquals(GameScreen.VICTORY, engine.screen)
 
         val saved = repository.getTopScores(5)
         assertEquals(1, saved.size)
-        assertEquals(CharacterType.REMI, saved.first().character)
+        assertEquals(CharacterType.VERO, saved.first().character)
         assertEquals(2, saved.first().levelReached)
         assertEquals(engine.score, saved.first().score)
     }
